@@ -1,0 +1,379 @@
+# ============================================================================
+# OMRON LD Roboter Konfiguration – Pendelroute Lasercutter <-> Nacharbeit
+# ============================================================================
+
+robot:
+  name: "Robot02"
+  ip: "172.16.100.26"
+  arcl_port: 7171
+  arcl_password: "admin"
+  connection_timeout: 10
+
+# ============================================================================
+# GOALS - Physische Ziele auf dem Roboter
+# ============================================================================
+goals:
+  lasercutter: "Lasercutter"
+  nacharbeit: "Nacharbeit"
+  dock: "dock"
+
+# ============================================================================
+# TASKS - Aufgaben für die Route
+# ============================================================================
+tasks:
+  load_plates:
+    type: "confirm_button"
+    goal: "lasercutter"
+    button_id: "ConfirmButton"
+    prompt: "Bitte Grundplatten laden und Knopf drücken."
+    timeout: 120
+
+  unload_parts:
+    type: "confirm_button"
+    goal: "nacharbeit"
+    button_id: "ConfirmButton"
+    prompt: "Bitte Teile entnehmen und Knopf drücken."
+    timeout: 120
+
+# ============================================================================
+# ROUTE - Endlosschleife Lasercutter <-> Nacharbeit
+# ============================================================================
+route:
+  name: "Loop_Lasercutter_Nacharbeit"
+  start_mode: "auto_from_position"
+  steps:
+    - goto: "lasercutter"
+      description: "Zum Lasercutter fahren"
+      wait: 1
+    - task: "load_plates"
+    - goto: "nacharbeit"
+      description: "Zur Nacharbeit fahren"
+      wait: 1
+    - task: "unload_parts"
+
+# ============================================================================
+# ARCL CONNECTION - Vollständige Konfiguration
+# ============================================================================
+arcl_connection:
+  # Socket Parameter
+  socket:
+    buffer_size: 8192              # recv() Buffer
+    connect_timeout: 10            # Initial connection timeout
+    command_timeout_default: 2.0   # Standard command timeout
+    receive_timeout_default: 1.0   # _receive_data default
+    
+  # Login Detection
+  login:
+    password_required_indicators:  # Banner enthält eines davon → Password nötig
+      - "password"
+      - "login"
+      - "auth"
+    login_success_indicators:      # Erfolgreicher Login
+      - ">"
+      - "welcome"
+      - "client"
+    login_failure_indicators:      # Login-Fehler
+      - "incorrect"
+      - "invalid"
+      - "wrong"
+    response_min_length: 10        # Minimale Länge für erfolgreichen Login
+    
+  # Receive Detection
+  receive:
+    end_indicators:                # Beenden des Receivings
+      - ">"
+      - "CommandOK"
+      - "CommandError" 
+      - "End of"
+    max_receive_loops: 50          # Max Schleifen-Iterationen (Anti-Hang)
+    
+  # Command Logging
+  logging:
+    show_commands: true            # "Sende: goto Lasercutter" ausgeben
+    exclude_commands:              # Kein Logging für diese Commands
+      - "status"
+      - "inputQuery"
+    show_banner: true              # Login-Banner anzeigen
+    show_login_response: true      # Login-Antwort anzeigen
+    
+  # Error Messages
+  messages:
+    connecting: "Verbinde zu {ip}:{port}..."
+    login_prompt: "Sende Passwort..."
+    login_success: "✓ Login erfolgreich"
+    login_failed: "✗ Passwort falsch!"
+    timeout: "✗ Timeout bei {ip}:{port}"
+    connection_refused: "✗ Verbindung verweigert"
+    disconnected: "Verbindung getrennt"
+    send_error: "Fehler bei '{command}': {error}"
+
+
+# ============================================================================
+# GOAL VALIDATOR - Vollständige Konfiguration
+# ============================================================================
+goal_validator:
+  # ARCL Commands
+  commands:
+    goals: "getGoals"                    # Hauptbefehl für Goals
+    docks: "mapObjectList dock"          # Hauptbefehl für Docks
+    routes: "getRoutes"                  # Optional: Routen validieren
+    
+  # Parsing Patterns
+  parsing:
+    goal_patterns:
+      primary: "^\\s*Goal:\\s+(\\S+)"    # Primäres Pattern
+      fallback: "Goal:(\\S+)"            # Fallback-Pattern
+    dock_patterns:
+      dock_prefix: ["Dock:", "dock "]     # Dock-Präfixe
+      exclude: ["End of docks", ""]       # Ignorieren
+    exclude_phrases: ["End of goals"]    # Allgemeine Exclude-Listen
+    
+  # Timeouts & Retries
+  timeouts:
+    command_timeout: 5.0
+    max_retries: 3
+    retry_delay: 1.0
+    
+  # Validierungs-Parameter
+  validation:
+    validate_steps: true                 # Einzelne Schritte validieren
+    show_available_on_error: true        # Verfügbare Ziele bei Fehler zeigen
+    fallback_dock: "dock"                # Default Dock bei Fehler
+    
+  # UI Nachrichten
+  messages:
+    fetching_goals: "Rufe Goals vom Roboter ab..."
+    fetching_docks: "Rufe Docks vom Roboter ab..."
+    goals_found: "✓ {count} Goals gefunden:"
+    docks_found: "✓ {count} Docks gefunden:"
+    no_goals: "⚠ Quoted-String-Parsing lieferte wenig Ergebnisse, versuche Zeilen-Parsing..."
+    no_docks: "⚠ Keine Docks gefunden"
+    validation_header: "Goal-Validierung"
+    goal_exists: "✓ '{target}' gefunden ({type})"
+    goal_missing: "✗ '{target}' existiert nicht!"
+    step_missing_mapping: "✗ Schritt {step}: '{logical}' nicht im goal_mapping!"
+    step_missing_goal: "✗ Schritt {step}: '{physical}' NICHT gefunden!"
+    summary: "Roboter hat {goals_count} Goals und {docks_count} Docks registriert"
+    fallback_used: "Fallback: '{fallback}' als Default-{type} verwendet"
+    
+  # Debug
+  debug:
+    show_raw_response: false
+    show_hex_dump: false
+    max_hex_bytes: 200
+
+# ============================================================================
+# ROUTE EXECUTOR - Vollständige Konfiguration
+# ============================================================================
+route_executor:
+  # Navigation Parameter
+  navigation:
+    timeout: 90
+    check_interval: 0.4
+    goto_timeout: 2.0
+    wait_after_arrival_default: 0
+
+  # Docking Parameter
+  dock:
+    enabled: true
+    command: "dock"
+    status_query: "queryDockStatus"
+    auto_charge: true
+    timeout: 60
+    emergency_timeout: 120
+    check_interval: 2.0
+
+  # Türprüfung Parameter
+  door_check:
+    makerspace_outside_goal: "makerspace_outside"
+    navigation_timeout: 20
+    retry_delay: 1.0
+    max_retries: 10
+    door_wait_time: 5
+
+  # Sprachausgaben - 100% konfigurierbar
+  voice:
+    lasercutter_arrived: "Bereit zum Laden der Grundplatten."
+    nacharbeit_arrived: "Entspricht meine Arbeit euren Wünschen, Hoheit Grinninger?"
+    
+    door_closed:
+      inside_to_outside: "Ich muss hier raus, ich halt's ned aus"
+      outside_to_inside: "Macht hoch die Tür, die Tor macht weit"
+    
+    door:
+      open: "Tür offen, Durchgang frei"
+      blocked: "Durchgang blockiert – warte auf Türöffnung"
+    
+    dock:
+      starting: "Docke an Default-Station"
+      success: "Erfolgreich gedockt und lädt"
+      timeout: "Docking-Timeout"
+      emergency: "Emergency Dock aktiviert - fahre zur Ladestation"
+    
+    navigation:
+      already_there: "Bereits am Ziel"
+      failed: "Navigation fehlgeschlagen"
+      timeout: "Navigation Timeout nach"
+    
+  
+
+  # Status Parsing Keywords
+  status_parsers:
+    success_indicators:
+      - "arrived"
+      - "idle"
+      - "done driving"
+    error_indicators:
+      - "failed going to goal"
+      - "failed going to"
+      - "cannot find path"
+      - "failed"
+    dock_indicators:
+      success: ["docked", "charging"]
+      error: ["error", "failed"]
+    battery_field: "BatteryVoltage"
+
+  # Reset Befehle
+  reset_commands:
+    - "stop"
+    - "taskCancel"
+    - "clearGoals"
+    - "enableMotors"
+
+  # Macro Parameter
+  macros:
+    max_wait: 30
+    check_interval: 1.0
+    backout_nacharbeit: "BackoutNacharbeit"
+
+  emergency:
+    exit_on_success: true      # sys.exit(0) nach Dock
+    exit_on_failure: true      # sys.exit(1) bei Dock-Fehler
+    wait_for_full_charge: false # Optional: Auf 100% warten
+
+  safety:
+    emergency_exit: true         # Globaler Emergency-Exit
+
+# ============================================================================
+# I/O HANDLER - Vollständige Konfiguration
+# ============================================================================
+io_handler:
+  polling:
+    interval: 0.2              # 200ms Polling (stabil!)
+    query_timeout: 0.5         # 500ms ARCL-Timeout
+    debounce_window: 0.5       # 500ms Bestätigungsfenster
+    state_timeout: 1.0         # 1s State-Cache
+    timeout_default: 600
+
+
+  # Regex Patterns für ARCL-Parsing
+  parsing:
+    input_query: ^\s*Input:\s+(\S+)\s+(on|off|true|false)  # inputQuery Response
+    input_list: ^\s*InputList:\s+(\S+)                     # inputList Response
+    
+  # Input-Filter
+  input_filter:
+    # Ignoriere generische Inputs (i1, i2, i3...)
+    ignore_generic: true
+    generic_pattern: ^i\d+$      # Regex für zu ignorierende Inputs
+    
+  # Validierungs-Nachrichten
+  messages:
+    button_pressed: "Button '{button_id}' pressed! ({elapsed:.1f}s)"
+    timeout: "Timeout: Button '{button_id}' not pressed within {timeout}s"
+    not_found: "Input '{button_id}' not found! Available: {available}"
+    parse_error: "Parse error, retrying..."
+    validation_fail: "button_id missing in task config!"
+
+  # Logging Level für IO-Handler
+  logging:
+    level: "INFO"
+    debug_responses: false       # Vollständige Responses loggen?
+
+  display:
+    enabled: false
+    max_length: 28              # Touchscreen-Grenze
+    touchscreen: true           # displayText
+    status_panel: true          # displayMessage
+
+# ============================================================================
+# MAIN PROGRAM - Vollständige Konfiguration
+# ============================================================================
+main:
+  # Modi
+  modes:
+    default: "execute"              # Standard-Modus: execute, validate, debug
+    loop_cycles_unlimited: true     # Endlosschleife oder max_cycles
+    max_cycles: 100                 # Bei loop_cycles_unlimited: false
+    
+  # Validierung
+  validation:
+    skip_goal_check: false          # Goal-Validierung überspringen?
+    continue_on_validation_fail: false  # Trotzdem fortfahren bei Fehlern?
+    ask_user_on_fail: true          # Benutzer fragen bei Validierungsfehler?
+    
+  # UI Nachrichten
+  messages:
+    header: "OMRON LD Roboter-Steuerung"
+    route_info: "Route: {route_name}"
+    cycle_start: "\n=== Zyklus {cycle} startet ==="
+    cycle_success: "✓ Zyklus beendet"
+    cycle_failed: "✗ Route in diesem Zyklus fehlgeschlagen – Abbruch"
+    validation_header: "CONFIG-VALIDIERUNG"
+    validation_success: "\n✓✓✓ ALLE CHECKS BESTANDEN!"
+    validation_failed: "\n✗ Validierung fehlgeschlagen"
+    validation_fix_config: "Korrigieren Sie die Fehler in config/robot_config.yaml"
+    connection_success: "✓ Verbindung erfolgreich"
+    connection_failed: "✗ Verbindung fehlgeschlagen"
+    skip_validation: "⚠ Goal-Validierung wird übersprungen"
+    user_prompt: "\nTrotzdem fortfahren? (j/N): "
+    interrupted: "\n⚠ Programm durch Benutzer abgebrochen"
+    unexpected_error: "\n✗ Unerwarteter Fehler: {error}"
+    program_end: "\nProgramm beendet"
+    
+  # CLI Argumente Mapping
+  cli:
+    debug_goals: ["--debug-goals", "-d"]
+    validate: ["--validate", "-v"] 
+    help: ["--help", "-h"]
+    no_validate: ["--no-validate", "--skip-validation"]
+    
+  # Debug
+  debug:
+    show_traceback: true           # Vollständige Exception-Tracebacks
+    config_path_default: "config/robot_config.yaml"
+
+  # Logging
+  logging:
+    level: "INFO"
+    show_cycle_progress: true
+
+
+# ============================================================================
+# EXECUTION
+# ============================================================================
+execution:
+  continue_on_error: false
+  navigation_timeout: 120
+  retry_on_failure: 2
+
+# ============================================================================
+# SAFETY
+# ============================================================================
+safety:
+  battery_threshold: 30.0
+  emergency_stop_on_error: true
+  emergency_return:
+    enabled: true
+    fallback_goals:
+      - "lasercutter"
+      - "nacharbeit"
+      - "dock"
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+logging:
+  level: "INFO"
+  directory: "logs"
+  retention_days: 7
