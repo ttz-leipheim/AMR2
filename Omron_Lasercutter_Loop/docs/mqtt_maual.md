@@ -12,15 +12,15 @@ Konfigurationsdatei config/robot_config.yaml ein:
 # MQTT CONNECTION - 100% Config-gesteuert
 # ============================================================================
 mqtt:
-  broker: "6cb0dc4093f24795858c66688fbff7a0.s1.eu.hivemq.cloud"
-  port: 8883                         # Port 8883 für verschlüsseltes SSL/TLS
-  tls: true                          # TLS aktivieren
-  client_id: "Robot02_MQTT_Client"
-  username: "Ihr_HiveMQ_Benutzer"    # In HiveMQ erstellter Benutzername
-  password: "Ihr_HiveMQ_Passwort"    # In HiveMQ erstelltes Passwort
+  broker: "6cb0dc4093f24795858c66688fbff7a0.s1.eu.hivemq.cloud"         
+  port: 8883                         
+  tls: true  
+  client_id: "Robot02_MQTT_Client_1"   
+  username: ""                      
+  password: ""                       
   topics:
-    command: "robot/Robot02/command"
-    status: "robot/Robot02/status"
+    command: "ttz-leipheim/amr2/command" --> Topic für eingehende Befehle (start, stop, restart)
+    status: "ttz-leipheim/amr2/status"   --> Topic für ausgehende Statusmeldungen (JSON)
 
 2. Programm starten
 
@@ -35,18 +35,18 @@ python main.py
         verbleibt an seiner Startposition und wartet auf eingehende
         MQTT-Befehle.
 
-3. Befehlsreferenz (Topic: robot/Robot02/command)
+3. Befehlsreferenz (Topic: ttz-leipheim/amr2/command)
 
 Senden Sie Befehle als Klartext (Payloads) an das konfigurierte Command-Topic.
 
 3.1 Allgemeine Systembefehle
 
-| Befehl                              | Aktion            | Beschreibung                                                                                                        |
-| :---------------------------------- | :---------------- | :------------------------------------------------------------------------------------------------------------------ |
-| **`start`** *(oder `order`, `run`)* | Automatik starten | Startet die automatische Pendelroute oder setzt sie nach einer Pause fort.                                          |
-| **`stop`** *(oder `pause`)*         | Pause am Ziel     | Pausiert den AMR. Er fährt noch bis zum nächsten Zielpunkt (bzw. beendet die aktive Aufgabe) und wartet dort.       |
-| **`restart`**                       | System-Reset      | Bricht den aktuellen Schritt sofort ab, setzt den Zyklus zurück und startet wieder bei **Schritt 1** (Lasercutter). |
-| **`dock`** *(oder `charge`)*        | Sofortiges Laden  | Bricht den aktuellen Schritt sofort ab, schickt den AMR **direkt zur Ladestation** und wartet dort im Lademodus.    |
+| Befehl              | Aktion            | Beschreibung                                                                                                        |
+| :------------------ | :---------------- | :------------------------------------------------------------------------------------------------------------------ |
+| **`start`**         | Automatik starten | Startet die automatische Pendelroute oder setzt sie nach einer Pause fort.                                          |
+| **`stop`**          | Pause am Ziel     | Pausiert den AMR. Er fährt noch bis zum nächsten Zielpunkt (bzw. beendet die aktive Aufgabe) und wartet dort.       |
+| **`restart`**       | System-Reset      | Bricht den aktuellen Schritt sofort ab, setzt den Zyklus zurück und startet wieder bei **Schritt 1** (Lasercutter). |
+| **`dock`**          | Sofortiges Laden  | Bricht den aktuellen Schritt sofort ab, schickt den AMR **direkt zur Ladestation** und wartet dort im Lademodus.    |
 
 3.2 Einzelschritt-Modus
 
@@ -54,20 +54,8 @@ Senden Sie Befehle als Klartext (Payloads) an das konfigurierte Command-Topic.
     B. eine einzelne Fahrt) und wechselt danach sofort wieder in den Wartemodus
     (WAITING_FOR_ORDER), bis der nächste Schritt-Befehl eintrifft.
 
-3.3 Direkte Subprozess-Ausführung
 
-Sie können vordefinierte Navigations- oder Taster-Aufgaben einzeln aufrufen. Das
-laufende Programm wird dabei unterbrochen und der Roboter führt nur diesen
-spezifischen Einzelprozess aus:
-
-  - goto:lasercutter: Navigiert direkt zum Lasercutter und pausiert dort.
-  - goto:nacharbeit: Navigiert direkt zur Nacharbeit und pausiert dort.
-  - task:load_plates: Startet direkt die Taster-Abfrage für das Laden am
-    Lasercutter und pausiert danach.
-  - task:unload_parts: Startet direkt die Taster-Abfrage für das Entladen an der
-    Nacharbeit und pausiert danach.
-
-4. Status-Überwachung (Topic: robot/Robot02/status)
+4. Status-Überwachung (Topic: ttz-leipheim/amr2/status)
 
 Der AMR sendet alle 2 Sekunden sowie nach jedem abgeschlossenen Prozessschritt
 ein JSON-Dokument an das Status-Topic.
