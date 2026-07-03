@@ -1,4 +1,19 @@
 # ============================================================================
+# MQTT CONNECTION - 100% Config-gesteuert
+# ============================================================================
+mqtt:
+  broker: "6cb0dc4093f24795858c66688fbff7a0.s1.eu.hivemq.cloud"            # IP-Adresse Ihres MQTT-Brokers
+  port: 8883                         # Port des MQTT-Brokers
+  tls: true  
+  client_id: "Robot02_MQTT_Client_1"   # Eindeutige Client-ID
+  username: "mqtt_amr2"                       # Optionaler Username
+  password: "wuJZqpEdtmh3PK"                       # Optionales Passwort
+  topics:
+    command: "ttz-leipheim/amr2/command" # Topic für eingehende Befehle (start, stop, restart)
+    status: "ttz-leipheim/amr2/status"   # Topic für ausgehende Statusmeldungen (JSON)
+
+
+# ============================================================================
 # OMRON LD Roboter Konfiguration – Pendelroute Lasercutter <-> Nacharbeit
 # ============================================================================
 
@@ -168,7 +183,7 @@ goal_validator:
 route_executor:
   # Navigation Parameter
   navigation:
-    timeout: 90
+    timeout: 600
     check_interval: 0.4
     goto_timeout: 2.0
     wait_after_arrival_default: 0
@@ -194,7 +209,7 @@ route_executor:
   # Sprachausgaben - 100% konfigurierbar
   voice:
     lasercutter_arrived: "Bereit zum Laden der Grundplatten."
-    nacharbeit_arrived: "Entspricht meine Arbeit euren Wünschen, Hoheit Grinninger?"
+    nacharbeit_arrived: "Bereit zum Entladen der Grundplatten."
     
     door_closed:
       inside_to_outside: "Ich muss hier raus, ich halt's ned aus"
@@ -259,7 +274,7 @@ route_executor:
 # ============================================================================
 io_handler:
   polling:
-    interval: 0.2              # 200ms Polling (stabil!)
+    interval: 0.2              # 200ms Polling 
     query_timeout: 0.5         # 500ms ARCL-Timeout
     debounce_window: 0.5       # 500ms Bestätigungsfenster
     state_timeout: 1.0         # 1s State-Cache
@@ -304,7 +319,7 @@ main:
   modes:
     default: "execute"              # Standard-Modus: execute, validate, debug
     loop_cycles_unlimited: true     # Endlosschleife oder max_cycles
-    max_cycles: 100                 # Bei loop_cycles_unlimited: false
+    max_cycles: false                 # Bei loop_cycles_unlimited: false
     
   # Validierung
   validation:
@@ -355,7 +370,7 @@ main:
 execution:
   continue_on_error: false
   navigation_timeout: 120
-  retry_on_failure: 2
+  retry_on_failure: 3
 
 # ============================================================================
 # SAFETY

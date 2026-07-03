@@ -10,26 +10,20 @@ from typing import Dict, Optional
 
 from src.arcl_connection import ARCLConnection
 from src.goal_validator import GoalValidator
-from src.route_handler import RouteExecutor
 from src.rich_ui import RobotUI
+from src.mqtt_handler import (
+    MQTTHandler, 
+    MQTTRouteExecutor, 
+    RestartCycleException, 
+    DockRequestedException, 
+    MqttDirectTaskException
+)
 
 
 def load_config(config_path: str = None) -> Dict:
     """
     Loads a configuration file from a file and returns it.
-
-    If no path is specified, the file "config/robot_config.yaml" is used.
-
-    Prints a message if the file was not found or a YAML error occurs.
-
-    Exits the program with an error code if the file was not found or a YAML error occurs.
-
-    :param config_path: Path to the configuration file
-    :type config_path: str
-    :return: The loaded configuration
-    :rtype: Dict
     """
-
     default_path = "config/robot_config.yaml"
     config_path = config_path or default_path
     
@@ -37,7 +31,6 @@ def load_config(config_path: str = None) -> Dict:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
         
-        # Main-Config mergen (Fallbacks)
         main_config = config.get('main', {})
         if 'config_path_default' in main_config.get('debug', {}):
             default_path = main_config['debug']['config_path_default']
@@ -58,20 +51,8 @@ def load_config(config_path: str = None) -> Dict:
 
 
 def parse_cli_args(config: Dict) -> Dict[str, bool]:
-    
     """
-    Parses the command line arguments and returns a dictionary containing the parsed arguments.
-
-    The function takes a configuration dictionary as input and returns a dictionary containing the parsed command line arguments.
-
-    The configuration dictionary should contain a 'main' key with a 'cli' key as a sub-dictionary. The 'cli' sub-dictionary should contain key-value pairs where the key is the name of the argument and the value is a list of strings representing the possible command line arguments for that argument.
-
-    The function returns a dictionary containing the parsed arguments where the key is the name of the argument and the value is a boolean indicating whether the argument was present in the command line or not.
-
-    :param config: The configuration dictionary containing the necessary command line argument settings.
-    :type config: Dict
-    :return: A dictionary containing the parsed command line arguments.
-    :rtype: Dict[str, bool]
+    Parses the command line arguments and returns a dictionary.
     """
     cli_config = config.get('main', {}).get('cli', {})
     args = {
@@ -85,25 +66,14 @@ def parse_cli_args(config: Dict) -> Dict[str, bool]:
         for cli_arg in cli_args:
             if cli_arg in sys.argv:
                 args[arg_name] = True
-                # Argument entfernen für clean parsing
                 sys.argv.remove(cli_arg)
     
     return args
 
 
 def debug_goals(config: Dict):
-    
     """
     Debug function to analyze the available goals from the robot.
-
-    It will connect to the robot using the provided configuration, fetch all available goals, and then print the parsed goals.
-
-    If no goals are found, it will print an error message.
-
-    The function will also print the raw response from the robot.
-
-    :param config: The configuration dictionary containing the necessary ARCL connection settings.
-    :type config: Dict
     """
     ui = RobotUI()
     messages = config.get('main', {}).get('messages', {})
@@ -136,19 +106,9 @@ def debug_goals(config: Dict):
         conn.disconnect()
 
 
-def validate_config(config: Dict):
-    
+def validate_config(config: Dict) -> bool:
     """
-    Validates the configuration by connecting to the robot and checking if all specified goals can be found.
-
-    Prints a header and success/error messages depending on the validation result.
-
-    If the validation fails, it will print a warning message with instructions on how to fix the configuration.
-
-    :param config: The configuration dictionary containing the necessary ARCL connection and goal validation settings.
-    :type config: Dict
-    :return: True if the validation was successful, False otherwise.
-    :rtype: bool
+    Validates the configuration by checking target goals on the AMR.
     """
     ui = RobotUI()
     messages = config.get('main', {}).get('messages', {})
@@ -163,7 +123,6 @@ def validate_config(config: Dict):
         
         ui.print_success(messages.get('connection_success', '✓ Connected'))
         
-        # Goal Mapping
         goal_mapping = dict(config.get('goals', {}))
         
         validator = GoalValidator(conn, config)
@@ -188,24 +147,8 @@ def validate_config(config: Dict):
 
 
 def execute_route_loop(config: Dict, conn: ARCLConnection, skip_validation: bool) -> int:
-    
     """
-    Executes the given route configuration in a loop.
-
-    The function will skip the validation step if the 'skip_validation' parameter is set to True.
-    Additionally, it will only execute the route if the validation step passes successfully.
-    If the validation step fails, the function will prompt the user to decide whether to continue or not.
-
-    The function will execute the route in a loop until the maximum number of cycles is reached or the user aborts the execution.
-
-    :param config: The configuration dictionary containing the necessary ARCL connection and route executor settings.
-    :type config: Dict
-    :param conn: The established ARCL connection.
-    :type conn: ARCLConnection
-    :param skip_validation: A boolean indicating whether to skip the validation step.
-    :type skip_validation: bool
-    :return: An integer indicating the success of the function.
-    :rtype: int
+    Executes the given route configuration in a loop utilizing MQTT control.
     """
     ui = RobotUI()
     main_config = config.get('main', {})
@@ -237,47 +180,83 @@ def execute_route_loop(config: Dict, conn: ARCLConnection, skip_validation: bool
             else:
                 return 1
     
-    # Route Executor
-    executor = RouteExecutor(conn, config)
-    ui.print_header("Route Execution (Loop)")
+    # Set up and connect MQTT Handler
+    mqtt_handler = MQTTHandler(config, ui)
+    if not mqtt_handler.connect():
+        ui.print_error("✗ MQTT connection failed - exiting program")
+        return 1
     
-    # Loop-Modus
+    # Instantiate custom MQTTRouteExecutor
+    executor = MQTTRouteExecutor(conn, config, mqtt_handler)
+    ui.print_header("Route Execution (Loop via MQTT)")
+    
     loop_config = main_config.get('modes', {})
     unlimited = loop_config.get('loop_cycles_unlimited', True)
     max_cycles = loop_config.get('max_cycles', 100)
     
-    cycle = 0
-    while (unlimited or cycle < max_cycles):
-        cycle += 1
-        msg = messages.get('cycle_start', '=== Cycle {cycle} starts ===')
-        ui.print_info(msg.format(cycle=cycle))
+    try:
+        cycle = 0
+        while (unlimited or cycle < max_cycles):
+            cycle += 1
+            msg = messages.get('cycle_start', '=== Cycle {cycle} starts ===')
+            ui.print_info(msg.format(cycle=cycle))
+            
+            try:
+                # Publish status prior to starting cycle
+                mqtt_handler.publish_status(executor)
+                
+                success = executor.execute_route()
+                
+                if success:
+                    ui.print_success(messages.get('cycle_success', '✓ Cycle completed'))
+                else:
+                    ui.print_error(messages.get('cycle_failed', '✗ Cycle failed - aborting'))
+                    break
+                    
+            except RestartCycleException:
+                ui.print_warning("🔄 Cycle restart requested via MQTT. Resetting cycle count...")
+                cycle = 0
+                continue
+                
+            except DockRequestedException:
+                ui.print_warning("🔌 Immediate docking request received via MQTT.")
+                executor._dock()
+                mqtt_handler._is_stopped = True
+                mqtt_handler._docked_timeout = True
+                mqtt_handler.publish_status(executor, state="DOCKED_TIMEOUT")
+                cycle = 0  # Ready for a fresh cycle on restart
+                continue
+                
+            except MqttDirectTaskException as ex:
+                ui.print_warning(f"🎯 Direct MQTT Task triggered: {ex.task_name}")
+                
+                # Execute direct task action
+                task_cfg = executor.config.get("tasks", {}).get(ex.task_name)
+                if task_cfg:
+                    ui.print_info(f"Direct Task executing for: {ex.task_name}")
+                    executor.step_executor.confirm_button_task.run(task_cfg)
+                else:
+                    ui.print_error(f"Task '{ex.task_name}' not found in configuration configuration!")
+                
+                # Force back to paused state after executing direct action
+                mqtt_handler._is_stopped = True
+                mqtt_handler.publish_status(executor, state="WAITING_FOR_ORDER")
+                cycle = 0
+                continue
+                
+        return 0
         
-        success = executor.execute_route()
-        
-        if success:
-            ui.print_success(messages.get('cycle_success', '✓ Cycle completed'))
-        else:
-            ui.print_error(messages.get('cycle_failed', '✗ Cycle failed - aborting'))
-            break
-    
-    return 0
+    finally:
+        mqtt_handler.disconnect()
 
 
 def print_help(config: Dict):
-    
-    """
-    Prints the help message with usage information and available command-line arguments.
-
-    :param config: The configuration dictionary containing the necessary CLI settings.
-    :type config: Dict
-    """
     ui = RobotUI()
     cli_config = config.get('main', {}).get('cli', {})
-    messages = config.get('main', {}).get('messages', {})
     
     ui.print_header("OMRON LD Robot Control")
     print("\nUsage:")
-    print("  python main.py                 Normal execution")
+    print("  python main.py                 Normal execution (MQTT Control Mode)")
     
     for mode, args in cli_config.items():
         arg_str = " | ".join(args)
@@ -289,19 +268,9 @@ def print_help(config: Dict):
 
 
 def main():
-    
-    """
-    Main entry point of the program.
-
-    This function is responsible for parsing the command line arguments, loading the configuration, and executing the route loop.
-
-    :return: An integer indicating the exit status of the program.
-    :rtype: int
-    """
     config = load_config()
     args = parse_cli_args(config)
     
-    # CLI-Modi
     if args['help']:
         print_help(config)
     
@@ -313,7 +282,6 @@ def main():
         validate_config(config)
         return
     
-    # Normale Ausführung
     skip_validation = args['skip_validation']
     conn = ARCLConnection(config)
     
