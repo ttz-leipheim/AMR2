@@ -7,6 +7,7 @@ import json
 import time
 import ssl
 from typing import Dict, Any, Optional
+from datetime import datetime, time as dt_time
 
 try:
     import paho.mqtt.client as mqtt
@@ -193,7 +194,16 @@ class MQTTHandler:
         self._docked_timeout = False
         self.ui.print_warning("⏸ AMR is in STOPPED state. Waiting for an MQTT command...")
         
+        # Working hours boundary parameters
+        start_time = dt_time(8, 0)
+        end_time = dt_time(18, 0)
+        
         while self._is_stopped:
+            # Check time schedule inside wait loop to dock immediately if off-hours occur while waiting
+            now = datetime.now()
+            if not (start_time <= now.time() < end_time):
+                raise DockRequestedException("Off-hours reached while waiting")
+
             # Check for immediate interrupts during wait state
             if self._dock_requested:
                 self._dock_requested = False

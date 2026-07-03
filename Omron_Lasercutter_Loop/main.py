@@ -1,12 +1,14 @@
 """
-OMRON LD Roboter-Steuerung - Hauptprogramm (100% Config-gesteuert)
+OMRON LD Roboter-Steuerung - Hauptprogramm (100% Config-gesteuert mit Zeitsteuerung)
 """
 
 import sys
 import yaml
 import traceback
+import time
 from pathlib import Path
 from typing import Dict, Optional
+from datetime import datetime, time as dt_time
 
 from src.arcl_connection import ARCLConnection
 from src.goal_validator import GoalValidator
@@ -148,7 +150,7 @@ def validate_config(config: Dict) -> bool:
 
 def execute_route_loop(config: Dict, conn: ARCLConnection, skip_validation: bool) -> int:
     """
-    Executes the given route configuration in a loop utilizing MQTT control.
+    Executes the given route configuration in a loop utilizing MQTT control and work hour scheduling.
     """
     ui = RobotUI()
     main_config = config.get('main', {})
@@ -188,7 +190,7 @@ def execute_route_loop(config: Dict, conn: ARCLConnection, skip_validation: bool
     
     # Instantiate custom MQTTRouteExecutor
     executor = MQTTRouteExecutor(conn, config, mqtt_handler)
-    ui.print_header("Route Execution (Loop via MQTT)")
+    ui.print_header("Route Execution (MQTT + Time Schedule)")
     
     loop_config = main_config.get('modes', {})
     unlimited = loop_config.get('loop_cycles_unlimited', True)
@@ -197,14 +199,42 @@ def execute_route_loop(config: Dict, conn: ARCLConnection, skip_validation: bool
     try:
         cycle = 0
         while (unlimited or cycle < max_cycles):
+            # Check current time against operational hours (08:00 - 18:00)
+            now = datetime.now()
+            start_time = dt_time(8, 0)
+            end_time = dt_time(18, 0)
+            
+            # 1. Handling Off-Hours (18:00 to 08:00 next day)
+            if not (start_time <= now.time() < end_time):
+                ui.print_warning(f"⏰ Off-hours active (08:00 - 18:00). Current time: {now.strftime('%H:%M:%S')}")
+                
+                # Command docking if the AMR is not already parked/docked
+                if not mqtt_handler._docked_timeout:
+                    ui.print_info("🔌 Sending robot to the docking station for the night...")
+                    executor._dock()
+                    mqtt_handler._docked_timeout = True
+                
+                # Keep AMR in stopped/waiting state and publish off-hours status
+                mqtt_handler._is_stopped = True
+                mqtt_handler.publish_status(executor, state="OFF_HOURS_WAITING")
+                
+                # Sleep and loop to check the schedule again
+                time.sleep(10.0)
+                continue
+                
+            # 2. Handling the 08:00 transition (Automatic Undock & Start)
+            if mqtt_handler._docked_timeout and (start_time <= now.time() < end_time):
+                ui.print_success("⏰ 08:00 reached! Automatically resuming working hours loop.")
+                mqtt_handler._docked_timeout = False
+                mqtt_handler._is_stopped = False
+            
+            # Start cycle
             cycle += 1
             msg = messages.get('cycle_start', '=== Cycle {cycle} starts ===')
             ui.print_info(msg.format(cycle=cycle))
             
             try:
-                # Publish status prior to starting cycle
                 mqtt_handler.publish_status(executor)
-                
                 success = executor.execute_route()
                 
                 if success:
@@ -236,7 +266,7 @@ def execute_route_loop(config: Dict, conn: ARCLConnection, skip_validation: bool
                     ui.print_info(f"Direct Task executing for: {ex.task_name}")
                     executor.step_executor.confirm_button_task.run(task_cfg)
                 else:
-                    ui.print_error(f"Task '{ex.task_name}' not found in configuration configuration!")
+                    ui.print_error(f"Task '{ex.action_target}' not found in configuration configuration!")
                 
                 # Force back to paused state after executing direct action
                 mqtt_handler._is_stopped = True
