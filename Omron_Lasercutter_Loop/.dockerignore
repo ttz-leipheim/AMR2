@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.git
+.gitignore
+logs/
+*.log
+.env
+.venv
+venv/
+.DS_Store
+
+# NEVER bake real credentials into the image - keep this out of the build
+# context entirely. It's mounted in at `docker run` time instead.
+config/robot_config.yaml

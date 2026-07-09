@@ -150,7 +150,7 @@ def validate_config(config: Dict) -> bool:
 
 def execute_route_loop(config: Dict, conn: ARCLConnection, skip_validation: bool) -> int:
     """
-    Executes the given route configuration in a loop utilizing MQTT control and work hour scheduling.
+    Executes the given route configuration in an endless loop utilizing MQTT control and work hour scheduling.
     """
     ui = RobotUI()
     main_config = config.get('main', {})
@@ -192,13 +192,9 @@ def execute_route_loop(config: Dict, conn: ARCLConnection, skip_validation: bool
     executor = MQTTRouteExecutor(conn, config, mqtt_handler)
     ui.print_header("Route Execution (MQTT + Time Schedule)")
     
-    loop_config = main_config.get('modes', {})
-    unlimited = loop_config.get('loop_cycles_unlimited', True)
-    max_cycles = loop_config.get('max_cycles', 100)
-    
     try:
         cycle = 0
-        while (unlimited or cycle < max_cycles):
+        while True:  # Endlosschleife für dauerhafte Rufbereitschaft
             # Check current time against operational hours (08:00 - 18:00)
             now = datetime.now()
             start_time = dt_time(8, 0)
@@ -234,18 +230,26 @@ def execute_route_loop(config: Dict, conn: ARCLConnection, skip_validation: bool
             ui.print_info(msg.format(cycle=cycle))
             
             try:
+                # Prüfen, ob der Roboter gestoppt ist und auf MQTT-Startbefehl warten (Rufbereitschaft)
+                mqtt_handler.check_and_wait_for_order(executor)
+                
                 mqtt_handler.publish_status(executor)
                 success = executor.execute_route()
                 
                 if success:
                     ui.print_success(messages.get('cycle_success', '✓ Cycle completed'))
                 else:
-                    ui.print_error(messages.get('cycle_failed', '✗ Cycle failed - aborting'))
-                    break
-                    
+                    ui.print_error(messages.get('cycle_failed', '✗ Cycle failed - returning to standby'))
+                
+                # Nach Abschluss (Erfolg oder Fehler): Zurück in die Rufbereitschaft versetzen
+                mqtt_handler._is_stopped = True
+                mqtt_handler.publish_status(executor, state="WAITING_FOR_ORDER")
+                
             except RestartCycleException:
-                ui.print_warning("🔄 Cycle restart requested via MQTT. Resetting cycle count...")
+                ui.print_warning("🔄 Cycle restart requested via MQTT. Resetting cycle count and entering standby...")
                 cycle = 0
+                mqtt_handler._is_stopped = True
+                mqtt_handler.publish_status(executor, state="WAITING_FOR_ORDER")
                 continue
                 
             except DockRequestedException:
@@ -254,7 +258,7 @@ def execute_route_loop(config: Dict, conn: ARCLConnection, skip_validation: bool
                 mqtt_handler._is_stopped = True
                 mqtt_handler._docked_timeout = True
                 mqtt_handler.publish_status(executor, state="DOCKED_TIMEOUT")
-                cycle = 0  # Ready for a fresh cycle on restart
+                cycle = 0  
                 continue
                 
             except MqttDirectTaskException as ex:
@@ -266,12 +270,20 @@ def execute_route_loop(config: Dict, conn: ARCLConnection, skip_validation: bool
                     ui.print_info(f"Direct Task executing for: {ex.task_name}")
                     executor.step_executor.confirm_button_task.run(task_cfg)
                 else:
-                    ui.print_error(f"Task '{ex.action_target}' not found in configuration configuration!")
+                    ui.print_error(f"Task '{ex.task_name}' not found in configuration!")
                 
                 # Force back to paused state after executing direct action
                 mqtt_handler._is_stopped = True
                 mqtt_handler.publish_status(executor, state="WAITING_FOR_ORDER")
                 cycle = 0
+                continue
+            
+            except Exception as e:
+                # Verhindert, dass unerwartete Fehler die Hauptschleife komplett crashen
+                ui.print_error(f"✗ Unexpected error in execution loop: {e}")
+                mqtt_handler._is_stopped = True
+                mqtt_handler.publish_status(executor, state="WAITING_FOR_ORDER")
+                time.sleep(5.0)  # Kurze Beruhigungszeit vor dem nächsten Durchlauf
                 continue
                 
         return 0
@@ -313,39 +325,37 @@ def main():
         return
     
     skip_validation = args['skip_validation']
-    conn = ARCLConnection(config)
+    ui = RobotUI()
     
-    try:
-        if not conn.connect():
-            ui = RobotUI()
-            ui.print_error("Connection failed - exiting")
-            return 1
-        
-        return execute_route_loop(config, conn, skip_validation)
-        
-    except KeyboardInterrupt:
-        ui = RobotUI()
-        messages = config.get('main', {}).get('messages', {})
-        ui.print_warning(messages.get('interrupted', '⚠ Interrupted by user'))
-        return 130
-        
-    except Exception as e:
-        ui = RobotUI()
-        messages = config.get('main', {}).get('messages', {})
-        ui.print_error(messages.get('unexpected_error', '✗ Unexpected error: {error}').format(error=e))
-        
-        debug_config = config.get('main', {}).get('debug', {})
-        if debug_config.get('show_traceback', True):
-            print(traceback.format_exc())
-        return 1
-        
-    finally:
-        if 'conn' in locals():
-            conn.disconnect()
-            ui = RobotUI()
+    # Äußere Schleife fängt physische Verbindungsabbrüche ab
+    while True:
+        conn = ARCLConnection(config)
+        try:
+            if not conn.connect():
+                ui.print_error("Connection failed - Retrying in 10 seconds...")
+                time.sleep(10.0)
+                continue
+            
+            execute_route_loop(config, conn, skip_validation)
+            
+        except KeyboardInterrupt:
             messages = config.get('main', {}).get('messages', {})
-            ui.print_info(messages.get('program_end', '\nProgram ended'))
-
+            ui.print_warning(messages.get('interrupted', '⚠ Interrupted by user'))
+            break  # Manueller Abbruch per Strg+C bleibt möglich
+            
+        except Exception as e:
+            messages = config.get('main', {}).get('messages', {})
+            ui.print_error(messages.get('unexpected_error', '✗ Unexpected error: {error}').format(error=e))
+            
+            debug_config = config.get('main', {}).get('debug', {})
+            if debug_config.get('show_traceback', True):
+                print(traceback.format_exc())
+            
+            ui.print_info("Re-initializing system in 10 seconds...")
+            time.sleep(10.0)
+        finally:
+            if 'conn' in locals():
+                conn.disconnect()
 
 if __name__ == "__main__":
     sys.exit(main())

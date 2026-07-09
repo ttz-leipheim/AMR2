@@ -78,33 +78,32 @@ class RouteExecutor:
             self.logger.log_step_end(idx, step_success)
 
             if step_success:
-                success_count += 1
-                self.ui.print_success(f"✓ Schritt {idx} erfolgreich\n")
-                if idx == len(steps):
-                    self.logger.log_status_snapshot(self._get_status(), f"Nach Schritt {idx}")
-            else:
-                self.ui.print_error(f"✗ Schritt {idx} fehlgeschlagen!\n")
-                self.logger.log_status_snapshot(self._get_status(), f"Fehler nach Schritt {idx}")
-                
-                # 🚨 EMERGENCY CHECK → DOCK & EXIT!
-                if self._should_emergency_dock():
-                    
-                    # DOCK & EXIT
-                    dock_success = self._emergency_dock()
-                    self.logger.finalize(dock_success)  # ✅ KEIN 'emergency=True'!
-                    
-                    if dock_success:
-                        self.ui.print_success("✅ Emergency Dock OK!")
-                        self.ui.print_info("💤 PROGRAMM BEENDET - Manueller Neustart nötig")
-                        sys.exit(0)  # ✅ BEENDET PROGRAMM!
-                    else:
-                        self.ui.print_error("❌ Emergency Dock FEHLgeschlagen!")
-                        sys.exit(1)
-                
-                # Normale Fehlerbehandlung
-                if not self.config.get('execution', {}).get('continue_on_error', False):
-                    self.ui.print_warning("⚠ Route abgebrochen (kein Emergency)")
-                    break
+                            success_count += 1
+                            self.ui.print_success(f"✓ Schritt {idx} erfolgreich\n")
+                            if idx == len(steps):
+                                self.logger.log_status_snapshot(self._get_status(), f"Nach Schritt {idx}")
+                            else:
+                                self.ui.print_error(f"✗ Schritt {idx} fehlgeschlagen!\n")
+                                self.logger.log_status_snapshot(self._get_status(), f"Fehler nach Schritt {idx}")
+                            
+                            # 🚨 EMERGENCY CHECK → DOCK & RETURN TO STANDBY (KEIN SYS.EXIT!)
+                            if self._should_emergency_dock():
+                                
+                                dock_success = self._emergency_dock()
+                                self.logger.finalize(dock_success)
+                                
+                                if dock_success:
+                                    self.ui.print_success("✅ Emergency Dock OK!")
+                                    self.ui.print_info("💤 Robot parked on dock. Returning to standby.")
+                                else:
+                                    self.ui.print_error("❌ Emergency Dock failed!")
+                                
+                                return False  # Übergibt Kontrolle zurück an die Endlosschleife in main.py
+                            
+                            # Normale Fehlerbehandlung
+                            if not self.config.get('execution', {}).get('continue_on_error', False):
+                                self.ui.print_warning("⚠ Route abgebrochen (kein Emergency)")
+                                break
 
         route_success = success_count == len(steps)
         self.logger.finalize(route_success)

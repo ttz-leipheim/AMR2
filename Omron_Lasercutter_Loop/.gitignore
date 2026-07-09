@@ -5,3 +5,7 @@ venv/
 # Exclude log directories and files
 logs/
 *.log
+
+# Exclude config directories and files
+config/robot_config.yaml
+
