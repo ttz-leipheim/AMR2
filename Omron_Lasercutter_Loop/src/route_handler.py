@@ -1,5 +1,5 @@
 """
-Route Executor - EMERGENCY DOCK → SYS.EXIT(0)
+Route Executor - EMERGENCY DOCK 
 """
 
 import sys  # ← WICHTIG!
@@ -86,7 +86,7 @@ class RouteExecutor:
                                 self.ui.print_error(f"✗ Schritt {idx} fehlgeschlagen!\n")
                                 self.logger.log_status_snapshot(self._get_status(), f"Fehler nach Schritt {idx}")
                             
-                            # 🚨 EMERGENCY CHECK → DOCK & RETURN TO STANDBY (KEIN SYS.EXIT!)
+                            # 🚨 EMERGENCY CHECK → DOCK & RETURN TO STANDBY 
                             if self._should_emergency_dock():
                                 
                                 dock_success = self._emergency_dock()
