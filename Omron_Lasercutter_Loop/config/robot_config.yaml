@@ -39,14 +39,14 @@ tasks:
   load_plates:
     type: "confirm_button"
     goal: "lasercutter"
-    button_id: "ConfirmButton"
+    button_id: "i14"
     prompt: "Bitte Grundplatten laden und Knopf drücken."
     timeout: 600
 
   unload_parts:
     type: "confirm_button"
     goal: "nacharbeit"
-    button_id: "ConfirmButton"
+    button_id: "i14"
     prompt: "Bitte Teile entnehmen und Knopf drücken."
     timeout: 600
 
